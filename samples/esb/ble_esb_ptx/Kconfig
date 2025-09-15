@@ -1,0 +1,43 @@
+#
+# Copyright (c) 2020 Nordic Semiconductor
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+source "Kconfig.zephyr"
+
+menu "Enhanced ShockBurst: Transmitter"
+
+config ESB_PTX_APP_LOG_LEVEL
+	int "Log level for the ESB PTX sample"
+	default 4
+config RADIO_ESB_BT
+	bool "ESB and Bluetooth"
+	select IPC_RADIO_BT
+	select ESB
+	select DYNAMIC_INTERRUPTS
+	select DYNAMIC_DIRECT_INTERRUPTS
+	select ESB_DYNAMIC_INTERRUPTS
+	select MPSL_DYNAMIC_INTERRUPTS
+	select SHARED_INTERRUPTS
+	help
+	  Enable the IPC ESB and Bluetooth radio serialization.
+config NFC_OOB_PAIRING
+	bool "Enable NFC OOB pairing"
+	depends on HAS_HW_NRF_NFCT
+	default y
+	select NFC_T2T_NRFXLIB
+	select NFC_NDEF
+	select NFC_NDEF_MSG
+	select NFC_NDEF_RECORD
+	select NFC_NDEF_LE_OOB_REC
+
+config SETTINGS
+	default y
+
+config ZMS
+	default y if (SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
+
+config NVS
+	default y if !(SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
+endmenu
