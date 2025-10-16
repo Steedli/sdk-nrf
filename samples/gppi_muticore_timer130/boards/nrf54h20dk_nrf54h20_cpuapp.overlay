@@ -1,0 +1,267 @@
+
+/ {
+	chosen {
+		zephyr,console = &uart136;
+	};    
+    /delete-node/ buttons;
+    /delete-node/ leds;
+    /delete-node/ pwmleds;
+
+    aliases {
+        /delete-property/ led0;
+        /delete-property/ led1;
+        /delete-property/ led2;
+        /delete-property/ led3;
+        /delete-property/ sw0;
+        /delete-property/ sw1;
+        /delete-property/ sw2;
+        /delete-property/ sw3;
+        /delete-property/ pwm-led0;
+    };
+};
+
+zephyr_udc0: &usbhs {
+	status = "disabled";
+};
+
+&cpuapp_dma_region {
+	status = "disabled";
+};
+
+&dma_fast_region {
+	status = "disabled";
+};
+
+zephyr_udc0: &usbhs {
+	status = "disabled";
+};
+
+&cpuapp_wdt010 {
+	status = "disabled";
+};
+
+&cpuapp_ieee802154 {
+	status = "disabled";
+};
+
+&cpuapp_bellboard {
+	status = "okay";
+};
+
+&cpurad_bellboard {
+	status = "disabled";
+};
+
+&cpuapp_cpurad_ipc {
+	status = "disabled";
+};
+
+&uart136 {
+	status = "disabled";
+};
+
+&timer120 {
+	status = "disabled";
+};
+
+&timer121 {
+	status = "disabled";
+};
+
+&timer130 {
+	status = "disabled";
+};
+
+&timer131 {
+	status = "disabled";
+};
+
+&timer132 {
+	status = "disabled";
+};
+
+&timer133 {
+	status = "disabled";
+};
+
+&timer134 {
+	status = "disabled";
+};
+
+&timer135 {
+	status = "disabled";
+};
+
+&timer137 {
+	status = "disabled";
+};
+&adc {
+	status = "disabled";
+};
+
+
+&nfct {
+	status = "disabled";
+};
+
+&spi120 {
+	status = "disabled";
+};
+
+&spi130 {
+	status = "disabled";
+};
+
+&i2c134 {
+	status = "disabled";
+};
+
+&i2c135 {
+	status = "disabled";
+};
+
+&dppic130 {
+	/* Remove default channels assignment */
+	/delete-property/ owned-channels;
+	/delete-property/ sink-channels;
+	/delete-property/ source-channels;
+	/delete-property/ nonsecure-channels;
+	status = "disabled";
+};
+
+&dppic131 {
+	/* Remove default channels assignment */
+	/delete-property/ owned-channels;
+	/delete-property/ sink-channels;
+	/delete-property/ source-channels;
+	/delete-property/ nonsecure-channels;
+	status = "disabled";
+};
+
+&dppic132 {
+	/* Remove default channels assignment */
+	/delete-property/ owned-channels;
+	/delete-property/ sink-channels;
+	/delete-property/ source-channels;
+	/delete-property/ nonsecure-channels;
+	status = "disabled";
+};
+
+&dppic133 {
+	/* Remove default channels assignment */
+	/delete-property/ owned-channels;
+	/delete-property/ sink-channels;
+	/delete-property/ source-channels;
+	/delete-property/ nonsecure-channels;
+	status = "disabled";
+};
+
+&dppic134 {
+	/* Remove default channels assignment */
+	/delete-property/ owned-channels;
+	/delete-property/ sink-channels;
+	/delete-property/ source-channels;
+	/delete-property/ nonsecure-channels;
+	status = "disabled";
+};
+
+&dppic135 {
+	/* Remove default channels assignment */
+	/delete-property/ owned-channels;
+	/delete-property/ sink-channels;
+	/delete-property/ source-channels;
+	/delete-property/ nonsecure-channels;
+	status = "disabled";
+};
+
+&ipct130 {
+	/* Remove default channels assignment */
+	/delete-property/ source-channel-links;
+	/delete-property/ sink-channel-links;
+	/delete-property/ owned-channels;
+	status = "disabled";
+};
+
+&gpiote130 {
+	status = "disabled";
+};
+
+&gpio0 {
+	status = "disabled";
+};
+
+&gpio1 {
+	status = "disabled";
+};
+
+&gpio2 {
+	status = "disabled";
+};
+
+&gpio6 {
+	status = "disabled";
+};
+
+&gpio7 {
+	status = "disabled";
+};
+
+&gpio9 {
+	status = "disabled";
+};
+
+&pwm130 {
+	status = "disabled";
+};
+
+&pwm131 {
+	status = "disabled";
+};
+
+&pwm132 {
+	status = "disabled";
+};
+
+&can120 {
+	status = "disabled";
+};
+
+&canpll {
+	status = "disabled";
+};
+
+&exmif {
+	status = "disabled";
+};
+
+// &button0 {
+// 	gpios = <&gpio7 0 GPIO_ACTIVE_HIGH>;
+// };
+
+// &button1 {
+// 	gpios = <&gpio7 1 GPIO_ACTIVE_HIGH>;
+// };
+
+// &button2 {
+// 	gpios = <&gpio7 2 GPIO_ACTIVE_HIGH>;
+// };
+
+// &button3 {
+// 	gpios = <&gpio7 3 GPIO_ACTIVE_HIGH>;
+// };
+
+// &led0 {
+// 	gpios = <&gpio7 4 GPIO_ACTIVE_HIGH>;
+// };
+
+// &led1 {
+// 	gpios = <&gpio7 5 GPIO_ACTIVE_HIGH>;
+// };
+
+// &led2 {
+// 	gpios = <&gpio7 6 GPIO_ACTIVE_HIGH>;
+// };
+
+// &led3 {
+// 	gpios = <&gpio7 7 GPIO_ACTIVE_HIGH>;
+// };
