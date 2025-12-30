@@ -8,8 +8,6 @@ menuconfig ESB
 	bool "Enhanced ShockBurst"
 	select NRFX_PPI if HAS_HW_NRF_PPI
 	select NRFX_DPPI if HAS_HW_NRF_DPPIC
-	select MPSL
-	select MPSL_FEM_ONLY if !ESB_DYNAMIC_INTERRUPTS
 	default n
 	help
 	  Enable ESB functionality.
@@ -151,7 +149,7 @@ config ESB_NEVER_DISABLE_TX
 
 config ESB_FAST_SWITCHING
 	select EXPERIMENTAL
-	depends on !ESB_NEVER_DISABLE_TX && (SOC_NRF54H20_CPURAD)
+	# depends on !ESB_NEVER_DISABLE_TX && (SOC_NRF54H20_CPURAD || SOC_SERIES_NRF54LX)
 	bool "Fast radio TX/RX and RX/TX switching [EXPERIMENTAL]"
 	help
 	  This option enables fast switching between transmit (TX) and receive (RX) modes
@@ -165,7 +163,7 @@ config ESB_FAST_SWITCHING
 
 config ESB_FAST_CHANNEL_SWITCHING
 	select EXPERIMENTAL
-	depends on SOC_NRF54H20_CPURAD
+	# depends on SOC_NRF54H20_CPURAD || SOC_SERIES_NRF54LX
 	bool "Fast radio channel switching [EXPERIMENTAL]"
 	help
 	  This option enables fast radio channel switching.
