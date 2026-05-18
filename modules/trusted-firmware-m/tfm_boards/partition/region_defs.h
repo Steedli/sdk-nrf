@@ -123,8 +123,10 @@
 #define NS_CODE_START (PM_APP_OFFSET)
 #define NS_CODE_SIZE  (PM_APP_SIZE)
 #else
-#define NS_CODE_START TFM_DT_REG_ADDR(TFM_DT_NODELABEL(slot0_ns_partition))
-#define NS_CODE_SIZE  TFM_DT_REG_SIZE(TFM_DT_NODELABEL(slot0_ns_partition))
+#define NS_CODE_START (TFM_DT_REG_ADDR(TFM_DT_NODELABEL(slot0_ns_partition)) + \
+		       TFM_MCUBOOT_OFFSET)
+#define NS_CODE_SIZE  (TFM_DT_REG_SIZE(TFM_DT_NODELABEL(slot0_ns_partition)) - \
+		       TFM_MCUBOOT_OFFSET)
 #endif
 #define NS_CODE_LIMIT (NS_CODE_START + NS_CODE_SIZE - 1)
 
