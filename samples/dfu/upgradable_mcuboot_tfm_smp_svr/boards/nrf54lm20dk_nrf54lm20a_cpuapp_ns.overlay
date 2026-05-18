@@ -1,0 +1,99 @@
+/*
+ * Static DTS partitions for nRF54LM20A TF-M builds with NSIB + upgradable MCUboot.
+ */
+
+/delete-node/ &slot0_partition;
+/delete-node/ &tfm_ps_partition;
+/delete-node/ &tfm_its_partition;
+/delete-node/ &tfm_otp_partition;
+/delete-node/ &slot0_ns_partition;
+/delete-node/ &storage_partition;
+
+&cpuapp_rram {
+	reg = <0x0 DT_SIZE_K(1940)>;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		b0_partition: partition@0 {
+			label = "b0";
+			reg = <0x00000000 0x00008000>;
+		};
+
+		s0_partition: partition@8000 {
+			label = "mcuboot-s0";
+			reg = <0x00008000 0x00018000>;
+		};
+
+		s1_partition: partition@20000 {
+			label = "mcuboot-s1";
+			reg = <0x00020000 0x00018000>;
+		};
+
+		tfm_its_partition: partition@38000 {
+			label = "tfm-its";
+			reg = <0x00038000 0x00004000>;
+		};
+
+		tfm_otp_partition: partition@3c000 {
+			label = "tfm-otp";
+			reg = <0x0003c000 0x00002000>;
+		};
+
+		tfm_ps_partition: partition@3e000 {
+			label = "tfm-ps";
+			reg = <0x0003e000 0x00004000>;
+		};
+
+		slot0_partition: partition@42000 {
+			compatible = "fixed-subpartitions";
+			label = "image-0";
+			reg = <0x00042000 0x000d1000>;
+			ranges = <0x0 0x00042000 0x000d1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			slot0_s_partition: partition@0 {
+				label = "image-0-secure";
+				reg = <0x00000000 0x00040000>;
+			};
+
+			slot0_ns_partition: partition@40000 {
+				label = "image-0-nonsecure";
+				reg = <0x00040000 0x00091000>;
+			};
+		};
+
+		slot1_partition: partition@113000 {
+			compatible = "fixed-subpartitions";
+			label = "image-1";
+			reg = <0x00113000 0x000d1000>;
+			ranges = <0x0 0x00113000 0x000d1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			slot1_s_partition: partition@0 {
+				label = "image-1-secure";
+				reg = <0x00000000 0x00040000>;
+			};
+
+			slot1_ns_partition: partition@40000 {
+				label = "image-1-nonsecure";
+				reg = <0x00040000 0x00091000>;
+			};
+		};
+
+		storage_partition: partition@1e4000 {
+			label = "storage";
+			reg = <0x001e4000 0x00001000>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &slot0_ns_partition;
+	};
+};
