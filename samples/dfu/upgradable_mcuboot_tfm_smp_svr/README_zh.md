@@ -34,6 +34,45 @@ NSIB/B0 是第一级不可变 bootloader。它会从 MCUboot S0 或 S1 slot 中�
 和 non-secure application 组成的 combined application image，然后跳转到
 TF-M secure vector table。
 
+### 验证流程
+
+B0/NSIB 会先验证 MCUboot，验证通过后才允许 MCUboot 执行：
+
+1. 复位后，B0 从 `b0_partition` 运行。
+2. B0 决定先尝试哪个 MCUboot slot。通常先尝试 `s0_partition`，如果 boot
+   状态或 monotonic counter 指示应使用另一个 slot，则尝试 `s1_partition`。
+3. B0 从被选中的 S0/S1 slot 中读取 MCUboot image metadata 和 firmware
+   information。
+4. B0 使用写入 KMU 的 public key 验证 MCUboot 签名。这个 key 的名字是
+   `BL_PUBKEY`。在本示例中，`sysbuild/CMakeLists.txt` 会生成
+   `keyfile.json`，`west flash` / `nrfutil` 会使用这个文件完成 KMU
+   provisioning。
+5. 如果签名和版本检查通过，B0 会按需更新 monotonic counter，然后跳转到
+   MCUboot。例如从 S0 启动时，跳转地址是 `0x8800`。
+6. 如果当前选择的 MCUboot slot 无效，B0 可以根据 boot 状态继续尝试另一个
+   MCUboot slot。
+
+然后 MCUboot 会验证 combined TF-M + application image：
+
+1. MCUboot 从 B0 选中的 S0/S1 slot 中启动。
+2. MCUboot 将 `slot0_partition` 作为 primary TF-M + application slot，
+   将 `slot1_partition` 作为 secondary TF-M + application slot。
+3. MCUboot 读取被选中的 application slot 起始处的 image header。对于
+   primary slot，这个地址是 `0x42000`。
+4. image payload 从 `0x800` 字节 MCUboot header 之后开始。因此在 primary
+   slot 中，TF-M 从 `0x42800` 开始，non-secure app vector table 位于
+   `0x82800`。
+5. MCUboot 解析 image TLV，检查 image hash，并使用编译进 MCUboot 的
+   application verification key 验证签名。
+6. 如果 `slot1_partition` 中存在 pending update，MCUboot 会执行当前配置的
+   swap 操作。本示例使用的是 `swap using move`，swap 后从
+   `slot0_partition` 启动新 image。
+7. 当选中的 TF-M + application image 验证通过后，MCUboot 跳转到
+   `slot0_partition + 0x800` 处的 TF-M secure vector table。
+8. TF-M 配置 secure/non-secure memory boundaries，将 non-secure VTOR/MSP
+   设置到 `slot0_ns_partition + 0x800` 处的 non-secure vector table，然后
+   启动 non-secure application。
+
 应用运行在 non-secure 域。因此应用不能直接读取 secure flash 区域，例如：
 
 - B0：`0x00000`
@@ -499,6 +538,118 @@ CONFIG_FW_INFO_FIRMWARE_VERSION=2
 ```
 
 APP 会在启动后打印自己的版本。B0 会打印它验证到的 MCUboot firmware version。
+
+## 签名私钥、公钥与 KMU Provisioning
+
+当前示例使用的是 MCUboot 默认开发 Ed25519 私钥：
+
+```text
+D:/workspace/NCS/v3.3.0/bootloader/mcuboot/root-ed25519.pem
+```
+
+它在 `sysbuild.conf` 中配置：
+
+```conf
+SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+```
+
+私钥和公钥是一对：
+
+- 私钥由 build system 用来给 image 签名。
+- 公钥可以从私钥中派生出来。
+- 验证方只需要公钥。
+- 私钥不应该写入设备，也不应该泄露。
+
+当前启动链中有两层验证关系：
+
+- B0 验证 MCUboot。
+  - MCUboot S0/S1 image 使用 `SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE`
+    指定的私钥签名。
+  - 对应的公钥会作为 `BL_PUBKEY` provision 到 KMU。
+  - 在本示例中，`sysbuild/CMakeLists.txt` 会生成用于 KMU provisioning 的
+    `keyfile.json`。
+
+- MCUboot 验证 TF-M + application image。
+  - application image 使用 `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` 指定的私钥签名。
+  - 对应的公钥会编译进 MCUboot。
+  - MCUboot 使用这个内置公钥验证 APP DFU image。
+
+为了简化示例，当前这两层验证使用同一把默认 key。客户项目中建议使用两套
+独立 key：
+
+- 一套 key 用于 B0 验证 MCUboot；
+- 一套 key 用于 MCUboot 验证 TF-M + application image。
+
+### 生成客户自己的 key
+
+在 sample 目录下创建本地 `keys` 目录：
+
+```powershell
+cd D:\workspace\NCS\v3.3.0\nrf\samples\dfu\upgradable_mcuboot_tfm_smp_svr
+mkdir keys
+```
+
+生成用于 B0 验证 MCUboot 的 key pair：
+
+```powershell
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py keygen `
+  -k keys\b0-root-ed25519.pem `
+  -t ed25519
+```
+
+生成用于 MCUboot 验证 TF-M + application image 的 key pair：
+
+```powershell
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py keygen `
+  -k keys\mcuboot-root-ed25519.pem `
+  -t ed25519
+```
+
+可选：打印或导出由私钥派生出的公钥内容：
+
+```powershell
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py getpub `
+  -k keys\b0-root-ed25519.pem
+
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py getpub `
+  -k keys\mcuboot-root-ed25519.pem
+```
+
+### 配置客户自己的 key
+
+修改 `sysbuild.conf`：
+
+```conf
+SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="${APP_DIR}/keys/b0-root-ed25519.pem"
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="${APP_DIR}/keys/mcuboot-root-ed25519.pem"
+```
+
+还需要同步修改 `sysbuild/CMakeLists.txt`。因为本示例会显式生成干净的 KMU
+provisioning 文件，生成 `BL_PUBKEY` 使用的 key 必须和
+`SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE` 一致：
+
+```cmake
+set(b0_signing_key ${CMAKE_CURRENT_LIST_DIR}/../keys/b0-root-ed25519.pem)
+```
+
+如果这里没有同步修改，就可能出现“MCUboot 使用新私钥签名，但 B0/KMU 里仍然是
+旧公钥”的情况，结果是 B0 拒绝启动 MCUboot。
+
+修改 key 后必须 pristine build：
+
+```powershell
+west build -p always -b nrf54lm20dk/nrf54lm20a/cpuapp/ns --sysbuild -d build -- -DEXTRA_CONF_FILE=bt.conf
+```
+
+然后使用 `--recover` 烧录，因为 KMU public key 需要重新 provision：
+
+```powershell
+west flash --recover --no-rebuild -d build
+```
+
+不要把私钥提交到公开仓库。量产项目应使用受控的 key-management 流程保存和使用
+签名私钥。
 
 ## 已知限制
 

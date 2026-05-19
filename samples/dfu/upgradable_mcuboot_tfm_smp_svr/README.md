@@ -33,6 +33,45 @@ the S0 or S1 MCUboot slot. MCUboot is the second-stage bootloader. It verifies
 the combined TF-M + non-secure application image and jumps to the TF-M secure
 vector table.
 
+### Verification Flow
+
+B0/NSIB verifies MCUboot before MCUboot is allowed to execute:
+
+1. After reset, B0 runs from `b0_partition`.
+2. B0 decides which MCUboot slot to try, normally `s0_partition` first unless
+   the boot state or monotonic counter indicates that `s1_partition` should be
+   used.
+3. B0 reads the MCUboot image metadata and firmware information from the
+   selected S0/S1 slot.
+4. B0 verifies the MCUboot signature using the public key provisioned into KMU
+   as `BL_PUBKEY`. In this sample, `sysbuild/CMakeLists.txt` generates the
+   `keyfile.json` used by `west flash` / `nrfutil` to provision that key.
+5. If the signature and version checks pass, B0 updates the monotonic counter
+   as needed and jumps to MCUboot, for example at `0x8800` when booting S0.
+6. If the selected slot is invalid, B0 can try the other MCUboot slot depending
+   on the boot state.
+
+MCUboot then verifies the combined TF-M + application image:
+
+1. MCUboot starts from the S0/S1 slot chosen by B0.
+2. MCUboot opens `slot0_partition` as the primary TF-M + application slot and
+   `slot1_partition` as the secondary TF-M + application slot.
+3. MCUboot reads the image header at the beginning of the selected application
+   slot. For the primary slot this is `0x42000`.
+4. The image payload starts after the `0x800`-byte MCUboot header. In the
+   primary slot this means TF-M starts at `0x42800`, and the non-secure app
+   vector table is at `0x82800`.
+5. MCUboot parses the image TLVs, checks the image hash, and verifies the
+   signature using the application verification key compiled into MCUboot.
+6. If `slot1_partition` contains a pending update, MCUboot performs the
+   configured swap operation (`swap using move` in this sample), then boots the
+   new image from `slot0_partition`.
+7. Once the selected TF-M + application image is valid, MCUboot jumps to the
+   TF-M secure vector table at `slot0_partition + 0x800`.
+8. TF-M configures secure/non-secure memory boundaries, sets the non-secure
+   VTOR/MSP to the non-secure vector table at `slot0_ns_partition + 0x800`, and
+   starts the non-secure application.
+
 The application runs in the non-secure domain. Because of this, the application
 cannot read secure flash regions such as:
 
@@ -519,6 +558,120 @@ CONFIG_FW_INFO_FIRMWARE_VERSION=2
 
 The application prints its version at boot. B0 prints the MCUboot firmware
 version it validated.
+
+## Signing Keys and Public Key Provisioning
+
+The current sample uses the MCUboot default development Ed25519 private key:
+
+```text
+D:/workspace/NCS/v3.3.0/bootloader/mcuboot/root-ed25519.pem
+```
+
+It is selected in `sysbuild.conf`:
+
+```conf
+SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+```
+
+The private key and public key are a pair:
+
+- The private key is used by the build system to sign images.
+- The public key is derived from the private key.
+- Verifiers use only the public key.
+- The private key must not be provisioned to the device.
+
+There are two verification relationships in this boot chain:
+
+- B0 verifies MCUboot.
+  - MCUboot S0/S1 images are signed with the private key selected by
+    `SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE`.
+  - The matching public key is provisioned into KMU as `BL_PUBKEY`.
+  - In this sample, `sysbuild/CMakeLists.txt` generates `keyfile.json` for that
+    KMU provisioning step.
+
+- MCUboot verifies the TF-M + application image.
+  - Application images are signed with the private key selected by
+    `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`.
+  - The matching public key is compiled into MCUboot.
+  - MCUboot uses that compiled-in public key to verify APP DFU images.
+
+For simplicity, this sample uses the same default key for both relationships.
+For a customer project, using separate keys is recommended:
+
+- one key pair for B0 verifying MCUboot;
+- one key pair for MCUboot verifying TF-M + application images.
+
+### Generate Customer Keys
+
+Create a local `keys` directory:
+
+```powershell
+cd D:\workspace\NCS\v3.3.0\nrf\samples\dfu\upgradable_mcuboot_tfm_smp_svr
+mkdir keys
+```
+
+Generate a key pair for B0 verifying MCUboot:
+
+```powershell
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py keygen `
+  -k keys\b0-root-ed25519.pem `
+  -t ed25519
+```
+
+Generate a key pair for MCUboot verifying TF-M + application images:
+
+```powershell
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py keygen `
+  -k keys\mcuboot-root-ed25519.pem `
+  -t ed25519
+```
+
+Optional: print or export the public key material derived from each private key:
+
+```powershell
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py getpub `
+  -k keys\b0-root-ed25519.pem
+
+python D:\workspace\NCS\v3.3.0\bootloader\mcuboot\scripts\imgtool.py getpub `
+  -k keys\mcuboot-root-ed25519.pem
+```
+
+### Configure the Customer Keys
+
+Update `sysbuild.conf`:
+
+```conf
+SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="${APP_DIR}/keys/b0-root-ed25519.pem"
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="${APP_DIR}/keys/mcuboot-root-ed25519.pem"
+```
+
+Also update `sysbuild/CMakeLists.txt`, because this sample explicitly generates
+a clean KMU provisioning file. The key used for `BL_PUBKEY` must match
+`SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE`:
+
+```cmake
+set(b0_signing_key ${CMAKE_CURRENT_LIST_DIR}/../keys/b0-root-ed25519.pem)
+```
+
+If this file is not updated, B0 can be provisioned with the old public key while
+MCUboot is signed by the new private key. In that case B0 will reject MCUboot.
+
+After changing keys, always run a pristine build:
+
+```powershell
+west build -p always -b nrf54lm20dk/nrf54lm20a/cpuapp/ns --sysbuild -d build -- -DEXTRA_CONF_FILE=bt.conf
+```
+
+Then flash with `--recover`, because the KMU public key must be provisioned
+again:
+
+```powershell
+west flash --recover --no-rebuild -d build
+```
+
+Do not commit private keys to a public repository. Keep production signing keys
+in a controlled key-management process.
 
 ## Known Limitations
 
