@@ -27,6 +27,130 @@ NSIB / B0 -> MCUboot S0/S1 -> TF-M secure image -> non-secure BLE SMP app
 - 广播名：`NCS_DFU_LM20A`
 - 测试使用的构建目录：`build_dts_ns`
 
+## 工程结构和 Sysbuild 集成方式
+
+这个示例是一个 sysbuild application。顶层 application 是 non-secure BLE SMP
+server，NSIB/B0 和 MCUboot 是由 sysbuild 加入构建的 bootloader images。
+
+关键目录结构如下：
+
+```text
+upgradable_mcuboot_tfm_smp_svr/
+├── CMakeLists.txt
+├── prj.conf
+├── bt.conf
+├── sysbuild.conf
+├── boards/
+│   ├── nrf54lm20dk_nrf54lm20a_cpuapp.overlay
+│   └── nrf54lm20dk_nrf54lm20a_cpuapp_ns.overlay
+├── src/
+│   ├── main.c
+│   └── bluetooth.c
+└── sysbuild/
+    ├── CMakeLists.txt
+    ├── b0/
+    │   ├── prj.conf
+    │   └── boards/nrf54lm20dk_nrf54lm20a_cpuapp.overlay
+    └── mcuboot/
+        ├── prj.conf
+        └── boards/
+            ├── nrf54lm20dk_nrf54lm20a_cpuapp.conf
+            └── nrf54lm20dk_nrf54lm20a_cpuapp.overlay
+```
+
+application image 由以下文件配置：
+
+- `prj.conf`
+  - 使能 MCUmgr、image management、flash map 和 MCUboot app update。
+  - 设置 `CONFIG_USE_DT_CODE_PARTITION=y`，让 app 使用 DTS 中的
+    `zephyr,code-partition`。
+  - 通过 `CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION` 设置 application signing
+    version。
+
+- `bt.conf`
+  - 使能 Bluetooth peripheral mode 和 SMP-over-Bluetooth transport。
+  - 增大 Bluetooth SMP buffer，提高 DFU throughput。
+
+- `boards/nrf54lm20dk_nrf54lm20a_cpuapp_ns.overlay`
+  - 为 non-secure build 提供 DTS 静态分区表。
+  - 设置 `zephyr,code-partition = &slot0_ns_partition`。
+
+`sysbuild.conf` 负责把 NSIB/B0 和 MCUboot 加入 sysbuild：
+
+```conf
+SB_CONFIG_PARTITION_MANAGER=n
+SB_CONFIG_SECURE_BOOT_APPCORE=y
+SB_CONFIG_BOOTLOADER_MCUBOOT=y
+SB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y
+```
+
+这些选项的作用如下：
+
+- `SB_CONFIG_PARTITION_MANAGER=n`
+  - 关闭 Partition Manager，使本示例使用 DTS fixed partitions。
+
+- `SB_CONFIG_SECURE_BOOT_APPCORE=y`
+  - 将 NSIB/B0 image 加入 sysbuild 构建。
+  - B0 成为 application core 的第一级不可变 bootloader。
+
+- `SB_CONFIG_BOOTLOADER_MCUBOOT=y`
+  - 将 MCUboot 作为第二级 bootloader image 加入构建。
+  - 因为同时使能了 secure boot，sysbuild 会把 MCUboot 构建成 S0/S1 可升级布局，
+    而不是单一固定 MCUboot partition。
+
+- `SB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y`
+  - 为 secure boot 和 MCUboot image signing 选择 Ed25519 签名。
+
+签名 key 在 `sysbuild.conf` 中配置：
+
+```conf
+SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+```
+
+- `SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE`
+  - 用于给 MCUboot 签名，供 B0/NSIB 验证。
+  - 对应 public key 会作为 `BL_PUBKEY` provision 到 KMU。
+
+- `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`
+  - 用于给 TF-M + application image 签名，供 MCUboot 验证。
+  - 对应 public key 会编译进 MCUboot。
+
+B0/NSIB 的 image-specific 配置位于 `sysbuild/b0/`：
+
+- `sysbuild/b0/prj.conf`
+  - 设置 `CONFIG_IS_SECURE_BOOTLOADER=y`。
+  - 使能 secure boot validation 和 secure boot storage。
+  - 保持 B0 配置尽量精简。
+
+- `sysbuild/b0/boards/nrf54lm20dk_nrf54lm20a_cpuapp.overlay`
+  - 选择 B0 的 code partition。
+
+MCUboot 的 image-specific 配置位于 `sysbuild/mcuboot/`：
+
+- `sysbuild/mcuboot/prj.conf`
+  - 作为空的基础配置文件，board-specific 设置放在 board 文件中。
+
+- `sysbuild/mcuboot/boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf`
+  - 根据 `s0_partition` / `s1_partition` 的大小调整 MCUboot 配置。
+  - 设置 MCUboot log。
+  - 设置 `CONFIG_FW_INFO_FIRMWARE_VERSION`。
+  - 确保 MCUboot 能放入 S0/S1 slot。
+
+- `sysbuild/mcuboot/boards/nrf54lm20dk_nrf54lm20a_cpuapp.overlay`
+  - include application core 的公共静态分区 overlay。
+  - 将 MCUboot 的 `zephyr,code-partition` 设置为 `s0_partition`。
+  - sysbuild 还会生成一个链接到 `s1_partition` 的 MCUboot S1 variant。
+
+最后，`sysbuild/CMakeLists.txt` 会生成干净的 `keyfile.json`：
+
+```text
+west ncs-provision upload --keyname BL_PUBKEY --dry-run ...
+```
+
+这个文件会被 `west flash` / `nrfutil` 使用，在执行 `west flash --recover` 时
+将 B0 public key provision 到 KMU。
+
 ## 启动和安全模型
 
 NSIB/B0 是第一级不可变 bootloader。它会从 MCUboot S0 或 S1 slot 中验证并

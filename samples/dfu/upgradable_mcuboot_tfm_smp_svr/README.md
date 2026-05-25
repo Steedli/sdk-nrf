@@ -26,6 +26,132 @@ not be used as-is for production.
 - Advertising name: `NCS_DFU_LM20A`
 - Build directory used during testing: `build_dts_ns`
 
+## Project Structure and Sysbuild Integration
+
+This sample is a sysbuild application. The top-level application is the
+non-secure BLE SMP server, and sysbuild adds the bootloader images around it.
+
+The important directory structure is:
+
+```text
+upgradable_mcuboot_tfm_smp_svr/
+├── CMakeLists.txt
+├── prj.conf
+├── bt.conf
+├── sysbuild.conf
+├── boards/
+│   ├── nrf54lm20dk_nrf54lm20a_cpuapp.overlay
+│   └── nrf54lm20dk_nrf54lm20a_cpuapp_ns.overlay
+├── src/
+│   ├── main.c
+│   └── bluetooth.c
+└── sysbuild/
+    ├── CMakeLists.txt
+    ├── b0/
+    │   ├── prj.conf
+    │   └── boards/nrf54lm20dk_nrf54lm20a_cpuapp.overlay
+    └── mcuboot/
+        ├── prj.conf
+        └── boards/
+            ├── nrf54lm20dk_nrf54lm20a_cpuapp.conf
+            └── nrf54lm20dk_nrf54lm20a_cpuapp.overlay
+```
+
+The application image is configured by:
+
+- `prj.conf`
+  - Enables MCUmgr, image management, flash map, and MCUboot app update support.
+  - Selects `CONFIG_USE_DT_CODE_PARTITION=y` so the app uses the DTS
+    `zephyr,code-partition`.
+  - Sets the application signing version with
+    `CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION`.
+
+- `bt.conf`
+  - Enables Bluetooth peripheral mode and the SMP-over-Bluetooth transport.
+  - Increases the Bluetooth SMP buffers for better DFU throughput.
+
+- `boards/nrf54lm20dk_nrf54lm20a_cpuapp_ns.overlay`
+  - Provides the DTS static partition table for the non-secure build.
+  - Sets `zephyr,code-partition = &slot0_ns_partition`.
+
+Sysbuild adds NSIB/B0 and MCUboot through `sysbuild.conf`:
+
+```conf
+SB_CONFIG_PARTITION_MANAGER=n
+SB_CONFIG_SECURE_BOOT_APPCORE=y
+SB_CONFIG_BOOTLOADER_MCUBOOT=y
+SB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y
+```
+
+These options have the following roles:
+
+- `SB_CONFIG_PARTITION_MANAGER=n`
+  - Disables Partition Manager and makes this sample use the DTS fixed
+    partitions.
+
+- `SB_CONFIG_SECURE_BOOT_APPCORE=y`
+  - Adds the NSIB/B0 image to the sysbuild build.
+  - B0 becomes the immutable first-stage bootloader for the application core.
+
+- `SB_CONFIG_BOOTLOADER_MCUBOOT=y`
+  - Adds MCUboot as a second-stage bootloader image.
+  - Because secure boot is also enabled, sysbuild builds MCUboot in an S0/S1
+    upgradable layout instead of a single fixed MCUboot partition.
+
+- `SB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y`
+  - Selects Ed25519 signatures for both secure boot and MCUboot image signing.
+
+The signing keys are configured in `sysbuild.conf`:
+
+```conf
+SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="${ZEPHYR_MCUBOOT_MODULE_DIR}/root-ed25519.pem"
+```
+
+- `SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE`
+  - Signs MCUboot for B0/NSIB.
+  - Its public key is provisioned to KMU as `BL_PUBKEY`.
+
+- `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`
+  - Signs the TF-M + application image for MCUboot.
+  - Its public key is compiled into MCUboot.
+
+B0/NSIB image-specific configuration is under `sysbuild/b0/`:
+
+- `sysbuild/b0/prj.conf`
+  - Sets `CONFIG_IS_SECURE_BOOTLOADER=y`.
+  - Enables secure boot validation and secure boot storage.
+  - Keeps the B0 configuration minimal.
+
+- `sysbuild/b0/boards/nrf54lm20dk_nrf54lm20a_cpuapp.overlay`
+  - Selects the B0 code partition.
+
+MCUboot image-specific configuration is under `sysbuild/mcuboot/`:
+
+- `sysbuild/mcuboot/prj.conf`
+  - Kept as an empty base configuration. Board-specific settings are in the
+    board file.
+
+- `sysbuild/mcuboot/boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf`
+  - Tunes MCUboot for the `s0_partition` / `s1_partition` sizes.
+  - Sets MCUboot logging.
+  - Sets `CONFIG_FW_INFO_FIRMWARE_VERSION`.
+  - Keeps MCUboot within the S0/S1 slot size.
+
+- `sysbuild/mcuboot/boards/nrf54lm20dk_nrf54lm20a_cpuapp.overlay`
+  - Includes the common application-core static partition overlay.
+  - Sets MCUboot's `zephyr,code-partition` to `s0_partition`.
+  - Sysbuild also generates an S1 variant of MCUboot linked for `s1_partition`.
+
+Finally, `sysbuild/CMakeLists.txt` generates a clean `keyfile.json`:
+
+```text
+west ncs-provision upload --keyname BL_PUBKEY --dry-run ...
+```
+
+This file is consumed by `west flash` / `nrfutil` to provision the B0 public key
+into KMU during `west flash --recover`.
+
 ## Boot and Security Model
 
 NSIB/B0 is the immutable first-stage bootloader. It verifies MCUboot from either
